@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bookstore/config"
 	"bookstore/handlers"
 
 	"github.com/gin-gonic/gin"
@@ -8,6 +9,8 @@ import (
 
 
 func main() {
+	config.InitDB()
+
 	bookHandler := handlers.NewBookHandler()
 	authorHandler := handlers.NewAuthorHandler()
 	categoryHandler := handlers.NewCategoryHandler()
@@ -19,6 +22,7 @@ func main() {
 	r.GET("/books/:id", bookHandler.GetBook)
 	r.PUT("/books/:id", bookHandler.UpdateBook)
 	r.DELETE("/books/:id", bookHandler.DeleteBook)
+	r.GET("/books/search", bookHandler.SearchBooks)
 
 	r.GET("/authors", authorHandler.GetAuthors)
 	r.POST("/authors", authorHandler.CreateAuthor)
@@ -26,7 +30,7 @@ func main() {
 	r.PUT("/authors/:id", authorHandler.UpdateAuthor)
 	r.DELETE("/authors/:id", authorHandler.DeleteAuthor)
 
-		r.GET("/categories", categoryHandler.GetCategories)
+	r.GET("/categories", categoryHandler.GetCategories)
 	r.POST("/categories", categoryHandler.CreateCategory)
 	r.GET("/categories/:id", categoryHandler.GetCategory)
 	r.PUT("/categories/:id", categoryHandler.UpdateCategory)

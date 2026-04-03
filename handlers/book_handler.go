@@ -3,29 +3,29 @@ package handlers
 import (
 	"net/http"
 	"strconv"
-	"strings"
 
+	"bookstore/config"
 	"bookstore/models"
 
 	"github.com/gin-gonic/gin"
+	"gorm.io/gorm"
 )
 
 type BookHandler struct {
-	books  []models.Book
-	nextID int
+	db *gorm.DB
 }
 
 func NewBookHandler() *BookHandler {
 	return &BookHandler{
-		books:  []models.Book{},
-		nextID: 1,
+		db: config.DB,
 	}
 }
 
 func (h *BookHandler) GetBooks(c *gin.Context) {
 	page := 1
 	limit := 10
-	category := ""
+	sort := c.Query("sort")
+	search := c.Query("search")
 
 	if p := c.Query("page"); p != "" {
 		if parsed, err := strconv.Atoi(p); err == nil && parsed > 0 {
@@ -39,35 +39,36 @@ func (h *BookHandler) GetBooks(c *gin.Context) {
 		}
 	}
 
-	if cParam := c.Query("category"); cParam != "" {
-		category = strings.ToLower(cParam)
+	offset := (page - 1) * limit
+
+	var books []models.Book
+	var total int64
+
+	query := h.db.Model(&models.Book{}).Preload("Author").Preload("Category")
+
+	if search != "" {
+		query = query.Where("title ILIKE ? OR isbn ILIKE ?", "%"+search+"%", "%"+search+"%")
 	}
 
-	filtered := h.books
-
-	if category != "" {
-		filtered = []models.Book{}
-		for _, book := range h.books {
-			if strings.Contains(strings.ToLower(book.Title), category) {
-				filtered = append(filtered, book)
-			}
-		}
-	}
-
-	total := len(filtered)
-	start := (page - 1) * limit
-	end := start + limit
-
-	if start >= total {
-		filtered = []models.Book{}
-	} else if end > total {
-		filtered = filtered[start:total]
+	if sort == "price_asc" {
+		query = query.Order("price asc")
+	} else if sort == "price_desc" {
+		query = query.Order("price desc")
+	} else if sort == "title" {
+		query = query.Order("title asc")
 	} else {
-		filtered = filtered[start:end]
+		query = query.Order("created_at desc")
 	}
+
+	if err := query.Offset(offset).Limit(limit).Find(&books).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch books"})
+		return
+	}
+
+	query.Count(&total)
 
 	response := gin.H{
-		"books": filtered,
+		"books": books,
 		"pagination": gin.H{
 			"page":  page,
 			"limit": limit,
@@ -80,20 +81,23 @@ func (h *BookHandler) GetBooks(c *gin.Context) {
 
 func (h *BookHandler) GetBook(c *gin.Context) {
 	idStr := c.Param("id")
-	id, err := strconv.Atoi(idStr)
+	id, err := strconv.ParseUint(idStr, 10, 32)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid book ID"})
 		return
 	}
 
-	for _, book := range h.books {
-		if book.ID == id {
-			c.JSON(http.StatusOK, book)
-			return
+	var book models.Book
+	if err := h.db.Preload("Author").Preload("Category").First(&book, id).Error; err != nil {
+		if err == gorm.ErrRecordNotFound {
+			c.JSON(http.StatusNotFound, gin.H{"error": "Book not found"})
+		} else {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch book"})
 		}
+		return
 	}
 
-	c.JSON(http.StatusNotFound, gin.H{"error": "Book not found"})
+	c.JSON(http.StatusOK, book)
 }
 
 func (h *BookHandler) CreateBook(c *gin.Context) {
@@ -114,18 +118,41 @@ func (h *BookHandler) CreateBook(c *gin.Context) {
 		return
 	}
 
-	book.ID = h.nextID
-	h.nextID++
-	h.books = append(h.books, book)
+	if book.AuthorID == 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Author ID is required"})
+		return
+	}
+
+	if book.CategoryID == 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Category ID is required"})
+		return
+	}
+
+	if err := h.db.Create(&book).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create book"})
+		return
+	}
+
+	h.db.Preload("Author").Preload("Category").First(&book, book.ID)
 
 	c.JSON(http.StatusCreated, book)
 }
 
 func (h *BookHandler) UpdateBook(c *gin.Context) {
 	idStr := c.Param("id")
-	id, err := strconv.Atoi(idStr)
+	id, err := strconv.ParseUint(idStr, 10, 32)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid book ID"})
+		return
+	}
+
+	var existingBook models.Book
+	if err := h.db.First(&existingBook, id).Error; err != nil {
+		if err == gorm.ErrRecordNotFound {
+			c.JSON(http.StatusNotFound, gin.H{"error": "Book not found"})
+		} else {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch book"})
+		}
 		return
 	}
 
@@ -145,33 +172,61 @@ func (h *BookHandler) UpdateBook(c *gin.Context) {
 		return
 	}
 
-	for i, book := range h.books {
-		if book.ID == id {
-			updatedBook.ID = id
-			h.books[i] = updatedBook
-			c.JSON(http.StatusOK, updatedBook)
-			return
-		}
+	if updatedBook.AuthorID == 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Author ID is required"})
+		return
 	}
 
-	c.JSON(http.StatusNotFound, gin.H{"error": "Book not found"})
+	if updatedBook.CategoryID == 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Category ID is required"})
+		return
+	}
+
+	if err := h.db.Model(&existingBook).Updates(updatedBook).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update book"})
+		return
+	}
+
+	h.db.Preload("Author").Preload("Category").First(&existingBook, id)
+
+	c.JSON(http.StatusOK, existingBook)
 }
 
 func (h *BookHandler) DeleteBook(c *gin.Context) {
 	idStr := c.Param("id")
-	id, err := strconv.Atoi(idStr)
+	id, err := strconv.ParseUint(idStr, 10, 32)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid book ID"})
 		return
 	}
 
-	for i, book := range h.books {
-		if book.ID == id {
-			h.books = append(h.books[:i], h.books[i+1:]...)
-			c.Status(http.StatusNoContent)
-			return
-		}
+	if err := h.db.Delete(&models.Book{}, id).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to delete book"})
+		return
 	}
 
-	c.JSON(http.StatusNotFound, gin.H{"error": "Book not found"})
+	c.Status(http.StatusNoContent)
+}
+
+func (h *BookHandler) SearchBooks(c *gin.Context) {
+	query := c.Query("q")
+	if query == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Search query is required"})
+		return
+	}
+
+	var books []models.Book
+	if err := h.db.Preload("Author").Preload("Category").
+		Where("title ILIKE ? OR isbn ILIKE ? OR EXISTS (SELECT 1 FROM authors WHERE authors.id = books.author_id AND authors.name ILIKE ?) OR EXISTS (SELECT 1 FROM categories WHERE categories.id = books.category_id AND categories.name ILIKE ?)", 
+			"%"+query+"%", "%"+query+"%", "%"+query+"%", "%"+query+"%").
+		Find(&books).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to search books"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"books": books,
+		"query": query,
+		"count": len(books),
+	})
 }

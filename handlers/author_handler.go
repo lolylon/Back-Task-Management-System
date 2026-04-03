@@ -4,43 +4,52 @@ import (
 	"net/http"
 	"strconv"
 
+	"bookstore/config"
 	"bookstore/models"
 
 	"github.com/gin-gonic/gin"
+	"gorm.io/gorm"
 )
 
 type AuthorHandler struct {
-	authors []models.Author
-	nextID  int
+	db *gorm.DB
 }
 
 func NewAuthorHandler() *AuthorHandler {
 	return &AuthorHandler{
-		authors: []models.Author{},
-		nextID:  1,
+		db: config.DB,
 	}
 }
 
 func (h *AuthorHandler) GetAuthors(c *gin.Context) {
-	c.JSON(http.StatusOK, h.authors)
+	var authors []models.Author
+	if err := h.db.Find(&authors).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch authors"})
+		return
+	}
+
+	c.JSON(http.StatusOK, authors)
 }
 
 func (h *AuthorHandler) GetAuthor(c *gin.Context) {
 	idStr := c.Param("id")
-	id, err := strconv.Atoi(idStr)
+	id, err := strconv.ParseUint(idStr, 10, 32)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid author ID"})
 		return
 	}
 
-	for _, author := range h.authors {
-		if author.ID == id {
-			c.JSON(http.StatusOK, author)
-			return
+	var author models.Author
+	if err := h.db.First(&author, id).Error; err != nil {
+		if err == gorm.ErrRecordNotFound {
+			c.JSON(http.StatusNotFound, gin.H{"error": "Author not found"})
+		} else {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch author"})
 		}
+		return
 	}
 
-	c.JSON(http.StatusNotFound, gin.H{"error": "Author not found"})
+	c.JSON(http.StatusOK, author)
 }
 
 func (h *AuthorHandler) CreateAuthor(c *gin.Context) {
@@ -56,18 +65,29 @@ func (h *AuthorHandler) CreateAuthor(c *gin.Context) {
 		return
 	}
 
-	author.ID = h.nextID
-	h.nextID++
-	h.authors = append(h.authors, author)
+	if err := h.db.Create(&author).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create author"})
+		return
+	}
 
 	c.JSON(http.StatusCreated, author)
 }
 
 func (h *AuthorHandler) UpdateAuthor(c *gin.Context) {
 	idStr := c.Param("id")
-	id, err := strconv.Atoi(idStr)
+	id, err := strconv.ParseUint(idStr, 10, 32)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid author ID"})
+		return
+	}
+
+	var existingAuthor models.Author
+	if err := h.db.First(&existingAuthor, id).Error; err != nil {
+		if err == gorm.ErrRecordNotFound {
+			c.JSON(http.StatusNotFound, gin.H{"error": "Author not found"})
+		} else {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch author"})
+		}
 		return
 	}
 
@@ -82,33 +102,28 @@ func (h *AuthorHandler) UpdateAuthor(c *gin.Context) {
 		return
 	}
 
-	for i, author := range h.authors {
-		if author.ID == id {
-			updatedAuthor.ID = id
-			h.authors[i] = updatedAuthor
-			c.JSON(http.StatusOK, updatedAuthor)
-			return
-		}
+	if err := h.db.Model(&existingAuthor).Updates(updatedAuthor).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update author"})
+		return
 	}
 
-	c.JSON(http.StatusNotFound, gin.H{"error": "Author not found"})
+	h.db.First(&existingAuthor, id)
+
+	c.JSON(http.StatusOK, existingAuthor)
 }
 
 func (h *AuthorHandler) DeleteAuthor(c *gin.Context) {
 	idStr := c.Param("id")
-	id, err := strconv.Atoi(idStr)
+	id, err := strconv.ParseUint(idStr, 10, 32)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid author ID"})
 		return
 	}
 
-	for i, author := range h.authors {
-		if author.ID == id {
-			h.authors = append(h.authors[:i], h.authors[i+1:]...)
-			c.Status(http.StatusNoContent)
-			return
-		}
+	if err := h.db.Delete(&models.Author{}, id).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to delete author"})
+		return
 	}
 
-	c.JSON(http.StatusNotFound, gin.H{"error": "Author not found"})
+	c.Status(http.StatusNoContent)
 }

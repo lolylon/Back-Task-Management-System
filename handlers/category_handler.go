@@ -4,43 +4,52 @@ import (
 	"net/http"
 	"strconv"
 
+	"bookstore/config"
 	"bookstore/models"
 
 	"github.com/gin-gonic/gin"
+	"gorm.io/gorm"
 )
 
 type CategoryHandler struct {
-	categories []models.Category
-	nextID     int
+	db *gorm.DB
 }
 
 func NewCategoryHandler() *CategoryHandler {
 	return &CategoryHandler{
-		categories: []models.Category{},
-		nextID:     1,
+		db: config.DB,
 	}
 }
 
 func (h *CategoryHandler) GetCategories(c *gin.Context) {
-	c.JSON(http.StatusOK, h.categories)
+	var categories []models.Category
+	if err := h.db.Find(&categories).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch categories"})
+		return
+	}
+
+	c.JSON(http.StatusOK, categories)
 }
 
 func (h *CategoryHandler) GetCategory(c *gin.Context) {
 	idStr := c.Param("id")
-	id, err := strconv.Atoi(idStr)
+	id, err := strconv.ParseUint(idStr, 10, 32)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid category ID"})
 		return
 	}
 
-	for _, category := range h.categories {
-		if category.ID == id {
-			c.JSON(http.StatusOK, category)
-			return
+	var category models.Category
+	if err := h.db.First(&category, id).Error; err != nil {
+		if err == gorm.ErrRecordNotFound {
+			c.JSON(http.StatusNotFound, gin.H{"error": "Category not found"})
+		} else {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch category"})
 		}
+		return
 	}
 
-	c.JSON(http.StatusNotFound, gin.H{"error": "Category not found"})
+	c.JSON(http.StatusOK, category)
 }
 
 func (h *CategoryHandler) CreateCategory(c *gin.Context) {
@@ -56,18 +65,29 @@ func (h *CategoryHandler) CreateCategory(c *gin.Context) {
 		return
 	}
 
-	category.ID = h.nextID
-	h.nextID++
-	h.categories = append(h.categories, category)
+	if err := h.db.Create(&category).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create category"})
+		return
+	}
 
 	c.JSON(http.StatusCreated, category)
 }
 
 func (h *CategoryHandler) UpdateCategory(c *gin.Context) {
 	idStr := c.Param("id")
-	id, err := strconv.Atoi(idStr)
+	id, err := strconv.ParseUint(idStr, 10, 32)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid category ID"})
+		return
+	}
+
+	var existingCategory models.Category
+	if err := h.db.First(&existingCategory, id).Error; err != nil {
+		if err == gorm.ErrRecordNotFound {
+			c.JSON(http.StatusNotFound, gin.H{"error": "Category not found"})
+		} else {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch category"})
+		}
 		return
 	}
 
@@ -82,33 +102,28 @@ func (h *CategoryHandler) UpdateCategory(c *gin.Context) {
 		return
 	}
 
-	for i, category := range h.categories {
-		if category.ID == id {
-			updatedCategory.ID = id
-			h.categories[i] = updatedCategory
-			c.JSON(http.StatusOK, updatedCategory)
-			return
-		}
+	if err := h.db.Model(&existingCategory).Updates(updatedCategory).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update category"})
+		return
 	}
 
-	c.JSON(http.StatusNotFound, gin.H{"error": "Category not found"})
+	h.db.First(&existingCategory, id)
+
+	c.JSON(http.StatusOK, existingCategory)
 }
 
 func (h *CategoryHandler) DeleteCategory(c *gin.Context) {
 	idStr := c.Param("id")
-	id, err := strconv.Atoi(idStr)
+	id, err := strconv.ParseUint(idStr, 10, 32)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid category ID"})
 		return
 	}
 
-	for i, category := range h.categories {
-		if category.ID == id {
-			h.categories = append(h.categories[:i], h.categories[i+1:]...)
-			c.Status(http.StatusNoContent)
-			return
-		}
+	if err := h.db.Delete(&models.Category{}, id).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to delete category"})
+		return
 	}
 
-	c.JSON(http.StatusNotFound, gin.H{"error": "Category not found"})
+	c.Status(http.StatusNoContent)
 }
