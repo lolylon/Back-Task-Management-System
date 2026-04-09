@@ -3,38 +3,52 @@ package main
 import (
 	"bookstore/config"
 	"bookstore/handlers"
+	"bookstore/middleware"
 
 	"github.com/gin-gonic/gin"
 )
 
-
 func main() {
 	config.InitDB()
 
-	bookHandler := handlers.NewBookHandler()
-	authorHandler := handlers.NewAuthorHandler()
-	categoryHandler := handlers.NewCategoryHandler()
+	taskHandler := handlers.NewTaskHandler()
+	userHandler := handlers.NewUserHandler()
+	projectHandler := handlers.NewProjectHandler()
+	authHandler := handlers.NewAuthHandler()
 
 	r := gin.Default()
 
-	r.GET("/books", bookHandler.GetBooks)
-	r.POST("/books", bookHandler.CreateBook)
-	r.GET("/books/:id", bookHandler.GetBook)
-	r.PUT("/books/:id", bookHandler.UpdateBook)
-	r.DELETE("/books/:id", bookHandler.DeleteBook)
-	r.GET("/books/search", bookHandler.SearchBooks)
+	// Public auth endpoints
+	r.POST("/auth/register", authHandler.Register)
+	r.POST("/auth/login", authHandler.Login)
 
-	r.GET("/authors", authorHandler.GetAuthors)
-	r.POST("/authors", authorHandler.CreateAuthor)
-	r.GET("/authors/:id", authorHandler.GetAuthor)
-	r.PUT("/authors/:id", authorHandler.UpdateAuthor)
-	r.DELETE("/authors/:id", authorHandler.DeleteAuthor)
+	// Protected routes
+	protected := r.Group("/")
+	protected.Use(middleware.AuthMiddleware())
+	{
+		// Task endpoints
+		protected.GET("/tasks", taskHandler.GetTasks)
+		protected.POST("/tasks", taskHandler.CreateTask)
+		protected.GET("/tasks/:id", taskHandler.GetTask)
+		protected.PUT("/tasks/:id", taskHandler.UpdateTask)
+		protected.DELETE("/tasks/:id", taskHandler.DeleteTask)
+		protected.GET("/tasks/search", taskHandler.SearchTasks)
+		protected.PUT("/tasks/:id/status", taskHandler.UpdateTaskStatus)
 
-	r.GET("/categories", categoryHandler.GetCategories)
-	r.POST("/categories", categoryHandler.CreateCategory)
-	r.GET("/categories/:id", categoryHandler.GetCategory)
-	r.PUT("/categories/:id", categoryHandler.UpdateCategory)
-	r.DELETE("/categories/:id", categoryHandler.DeleteCategory)
+		// User endpoints
+		protected.GET("/users", userHandler.GetUsers)
+		protected.POST("/users", userHandler.CreateUser)
+		protected.GET("/users/:id", userHandler.GetUser)
+		protected.PUT("/users/:id", userHandler.UpdateUser)
+		protected.DELETE("/users/:id", userHandler.DeleteUser)
 
-	r.Run(":8080")
+		// Project endpoints
+		protected.GET("/projects", projectHandler.GetProjects)
+		protected.POST("/projects", projectHandler.CreateProject)
+		protected.GET("/projects/:id", projectHandler.GetProject)
+		protected.PUT("/projects/:id", projectHandler.UpdateProject)
+		protected.DELETE("/projects/:id", projectHandler.DeleteProject)
+	}
+
+	r.Run(":8084")
 }

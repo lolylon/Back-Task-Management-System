@@ -18,7 +18,7 @@ func InitDB() {
 	dbPort := getEnv("DB_PORT", "5432")
 	dbUser := getEnv("DB_USER", "postgres")
 	dbPassword := getEnv("DB_PASSWORD", "1234")
-	dbName := getEnv("DB_NAME", "bookstore")
+	dbName := getEnv("DB_NAME", "taskmanager")
 
 	dsn := fmt.Sprintf("host=%s user=%s password=%s dbname=%s port=%s sslmode=disable TimeZone=UTC",
 		dbHost, dbUser, dbPassword, dbName, dbPort)
@@ -31,7 +31,7 @@ func InitDB() {
 
 	fmt.Println("Database connected successfully")
 
-	err = DB.AutoMigrate(&models.Book{}, &models.Author{}, &models.Category{})
+	err = DB.AutoMigrate(&models.User{}, &models.Project{}, &models.Task{})
 	if err != nil {
 		log.Fatal("Failed to migrate database:", err)
 	}
