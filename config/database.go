@@ -5,8 +5,6 @@ import (
 	"log"
 	"os"
 
-	"bookstore/models"
-
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
 )
@@ -31,12 +29,9 @@ func InitDB() {
 
 	fmt.Println("Database connected successfully")
 
-	err = DB.AutoMigrate(&models.User{}, &models.Project{}, &models.Task{})
-	if err != nil {
-		log.Fatal("Failed to migrate database:", err)
-	}
-
-	fmt.Println("Database migration completed")
+	// Migrations are now handled by golang-migrate
+	// Use 'make migrate-up' to apply migrations
+	fmt.Println("Database ready. Use 'make migrate-up' to apply migrations")
 }
 
 func getEnv(key, defaultValue string) string {
